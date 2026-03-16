@@ -13,7 +13,7 @@ import {
 } from "../components/ui/dialog";
 import { useToast } from "../hooks/use-toast";
 import { useAuth } from "../hooks/useAuth";
-import { supabase } from "../integrations/supabase/client";
+import { resumesApi, optimizationsApi } from "../lib/api";
 import { optimizeResume } from "../lib/gemini";
 import {
   Upload,
@@ -78,14 +78,19 @@ export const ResumeOptimizer = () => {
     if (!user) return;
 
     try {
-      const { data, error } = await supabase
-        .from("resume_optimizations")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setOptimizations(data || []);
+      const data = await optimizationsApi.list();
+      setOptimizations(
+        (data || []).map((o: any) => ({
+          id: o._id,
+          optimized_resume: o.optimizedResume,
+          cover_letter: o.coverLetter,
+          match_score: o.matchScore,
+          matched_keywords: o.matchedKeywords || [],
+          tips: o.tips || [],
+          highlights: o.highlights || [],
+          created_at: o.createdAt,
+        }))
+      );
     } catch (error) {
       console.error("Error fetching optimizations:", error);
     }
@@ -95,14 +100,16 @@ export const ResumeOptimizer = () => {
     if (!user) return;
 
     try {
-      const { data, error } = await supabase
-        .from("resumes")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setResumes(data || []);
+      const data = await resumesApi.list();
+      setResumes(
+        (data || []).map((r: any) => ({
+          id: r._id,
+          title: r.title,
+          content: r.content,
+          file_type: r.fileType,
+          created_at: r.createdAt,
+        }))
+      );
     } catch (error) {
       console.error("Error fetching resumes:", error);
     }
@@ -120,12 +127,7 @@ export const ResumeOptimizer = () => {
 
   const deleteOptimization = async (id: string) => {
     try {
-      const { error } = await supabase
-        .from("resume_optimizations")
-        .delete()
-        .eq("id", id);
-
-      if (error) throw error;
+      await optimizationsApi.delete(id);
 
       fetchOptimizations();
       toast({
@@ -143,9 +145,7 @@ export const ResumeOptimizer = () => {
 
   const deleteResume = async (id: string) => {
     try {
-      const { error } = await supabase.from("resumes").delete().eq("id", id);
-
-      if (error) throw error;
+      await resumesApi.delete(id);
 
       fetchResumes();
       toast({
@@ -209,21 +209,13 @@ export const ResumeOptimizer = () => {
           setResumeContent(extractedText);
 
           if (user) {
-            const resumeData = {
-              user_id: user.id,
-              title: file.name.replace(/\.[^/.]+$/, ""),
-              content: extractedText,
-              file_type: file.type === "application/pdf" ? "pdf" : "docx",
-            };
-
             try {
-              const { error } = await supabase
-                .from("resumes")
-                .insert(resumeData);
-
-              if (!error) {
-                fetchResumes();
-              }
+              await resumesApi.create({
+                title: file.name.replace(/\.[^/.]+$/, ""),
+                content: extractedText,
+                fileType: file.type === "application/pdf" ? "pdf" : "docx",
+              });
+              fetchResumes();
             } catch (error) {
               console.error("Error saving resume:", error);
             }

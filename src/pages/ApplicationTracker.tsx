@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
+import { applicationsApi } from '@/lib/api';
 import { Plus, Building, MapPin, Calendar, Loader2, Edit, Trash2 } from 'lucide-react';
 
 interface Application {
@@ -55,23 +55,17 @@ export const ApplicationTracker = () => {
 
   const loadApplications = async () => {
     try {
-      const { data, error } = await supabase
-        .from('job_applications')
-        .select('*')
-        .eq('user_id', user!.id)
-        .order('created_at', { ascending: false });
+      const data = await applicationsApi.list();
 
-      if (error) throw error;
-      
-      const formattedApplications = data?.map(app => ({
-        id: app.id,
-        company: app.company_name,
-        role: app.job_title,
+      const formattedApplications = (data || []).map((app: any) => ({
+        id: app._id,
+        company: app.companyName,
+        role: app.jobTitle,
         status: app.status,
-        appliedDate: new Date(app.applied_date || app.created_at).toLocaleDateString(),
+        appliedDate: new Date(app.appliedDate || app.createdAt).toLocaleDateString(),
         notes: app.notes || ''
-      })) || [];
-      
+      }));
+
       setApplications(formattedApplications);
     } catch (error) {
       console.error('Error loading applications:', error);
@@ -97,27 +91,20 @@ export const ApplicationTracker = () => {
 
     setSaving(true);
     try {
-      const { data, error } = await supabase
-        .from('job_applications')
-        .insert({
-          user_id: user!.id,
-          company_name: formData.company.trim(),
-          job_title: formData.role.trim(),
-          status: formData.status,
-          notes: formData.notes.trim() || null,
-          applied_date: new Date().toISOString().split('T')[0]
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+      const data = await applicationsApi.create({
+        companyName: formData.company.trim(),
+        jobTitle: formData.role.trim(),
+        status: formData.status,
+        notes: formData.notes.trim() || undefined,
+        appliedDate: new Date().toISOString().split('T')[0]
+      });
 
       const newApplication: Application = {
-        id: data.id,
-        company: data.company_name,
-        role: data.job_title,
+        id: data._id,
+        company: data.companyName,
+        role: data.jobTitle,
         status: data.status,
-        appliedDate: new Date(data.applied_date).toLocaleDateString(),
+        appliedDate: new Date(data.appliedDate).toLocaleDateString(),
         notes: data.notes || ''
       };
 
@@ -163,19 +150,12 @@ export const ApplicationTracker = () => {
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('job_applications')
-        .update({
-          company_name: editFormData.company.trim(),
-          job_title: editFormData.role.trim(),
-          status: editFormData.status,
-          notes: editFormData.notes.trim() || null,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', id)
-        .eq('user_id', user!.id);
-
-      if (error) throw error;
+      await applicationsApi.update(id, {
+        companyName: editFormData.company.trim(),
+        jobTitle: editFormData.role.trim(),
+        status: editFormData.status,
+        notes: editFormData.notes.trim() || undefined,
+      });
 
       setApplications(prev => prev.map(app => 
         app.id === id 
@@ -213,13 +193,7 @@ export const ApplicationTracker = () => {
 
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('job_applications')
-        .delete()
-        .eq('id', id)
-        .eq('user_id', user!.id);
-
-      if (error) throw error;
+      await applicationsApi.delete(id);
 
       setApplications(prev => prev.filter(app => app.id !== id));
       toast({
