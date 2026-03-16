@@ -1,11 +1,16 @@
 import { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { authApi } from '@/lib/api';
+
+interface User {
+  _id: string;
+  id: string;
+  email: string;
+  fullName: string;
+}
 
 interface AuthContextType {
   user: User | null;
-  session: Session | null;
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: any }>;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
@@ -16,98 +21,84 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
+  const normalizeUser = (u: any): User => ({
+    _id: u._id,
+    id: u._id,
+    email: u.email,
+    fullName: u.fullName || '',
+  });
+
+  // Check for existing session on mount
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
+    const initAuth = async () => {
+      const token = localStorage.getItem('token');
+      if (!token) {
         setLoading(false);
-        
-        if (event === 'SIGNED_IN' && session?.user) {
-          // Create profile if it doesn't exist
-          setTimeout(async () => {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('user_id', session.user.id)
-              .maybeSingle();
-            
-            if (!profile) {
-              await supabase.from('profiles').insert({
-                user_id: session.user.id,
-                email: session.user.email,
-                full_name: session.user.user_metadata?.full_name || ''
-              });
-            }
-          }, 0);
-        }
+        return;
       }
-    );
 
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+      try {
+        const { user: userData } = await authApi.getMe();
+        setUser(normalizeUser(userData));
+      } catch {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    return () => subscription.unsubscribe();
+    initAuth();
   }, []);
 
   const signUp = async (email: string, password: string, fullName?: string) => {
-    const redirectUrl = `${window.location.origin}/`;
-    
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: {
-          full_name: fullName || ''
-        }
-      }
-    });
+    try {
+      const data = await authApi.signup(email, password, fullName);
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      setUser(normalizeUser(data.user));
 
-    if (error) {
+      toast({
+        title: "Account created",
+        description: "Welcome to Smart Apply AI!"
+      });
+
+      return { error: null };
+    } catch (error: any) {
       toast({
         title: "Sign up failed",
         description: error.message,
         variant: "destructive"
       });
-    } else {
-      toast({
-        title: "Check your email",
-        description: "We sent you a confirmation link"
-      });
+      return { error };
     }
-
-    return { error };
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    });
+    try {
+      const data = await authApi.login(email, password);
+      localStorage.setItem('token', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      setUser(normalizeUser(data.user));
 
-    if (error) {
+      return { error: null };
+    } catch (error: any) {
       toast({
         title: "Sign in failed",
         description: error.message,
         variant: "destructive"
       });
+      return { error };
     }
-
-    return { error };
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setUser(null);
     toast({
       title: "Signed out",
       description: "You have been signed out successfully"
@@ -115,7 +106,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, signUp, signIn, signOut, loading }}>
+    <AuthContext.Provider value={{ user, signUp, signIn, signOut, loading }}>
       {children}
     </AuthContext.Provider>
   );
