@@ -8,7 +8,7 @@ import { Textarea } from '../components/ui/textarea';
 import { Avatar, AvatarFallback, AvatarImage } from '../components/ui/avatar';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../hooks/use-toast';
-import { supabase } from '../integrations/supabase/client';
+import { profileApi } from '../lib/api';
 import { User, Camera, Loader2 } from 'lucide-react';
 
 interface ProfileData {
@@ -37,30 +37,20 @@ export const Profile = () => {
 
   const fetchProfile = async () => {
     if (!user) return;
-    
+
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (error && error.code !== 'PGRST116') throw error;
-
+      const data = await profileApi.get();
       if (data) {
-        setProfileData(data);
-      } else {
-        // Create initial profile if none exists
-        const { error: insertError } = await supabase
-          .from('profiles')
-          .insert({
-            user_id: user.id,
-            email: user.email,
-            full_name: user.user_metadata?.full_name || ''
-          });
-        
-        if (insertError) throw insertError;
+        setProfileData({
+          full_name: data.fullName,
+          phone: data.phone,
+          location: data.location,
+          professional_title: data.professionalTitle,
+          company: data.company,
+          bio: data.bio,
+          avatar_url: data.avatarUrl,
+        });
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -98,21 +88,9 @@ export const Profile = () => {
 
     setIsUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${user.id}/avatar.${fileExt}`;
-      
-      const { error: uploadError } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, file, { upsert: true });
+      const data = await profileApi.uploadAvatar(file);
+      setProfileData(prev => ({ ...prev, avatar_url: data.avatarUrl }));
 
-      if (uploadError) throw uploadError;
-
-      const { data } = supabase.storage
-        .from('avatars')
-        .getPublicUrl(fileName);
-
-      setProfileData(prev => ({ ...prev, avatar_url: data.publicUrl }));
-      
       toast({
         title: "Success",
         description: "Profile picture uploaded successfully.",
@@ -134,15 +112,15 @@ export const Profile = () => {
 
     setIsSaving(true);
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({
-          user_id: user.id,
-          email: user.email,
-          ...profileData
-        });
-
-      if (error) throw error;
+      await profileApi.update({
+        fullName: profileData.full_name,
+        phone: profileData.phone,
+        location: profileData.location,
+        professionalTitle: profileData.professional_title,
+        company: profileData.company,
+        bio: profileData.bio,
+        avatarUrl: profileData.avatar_url,
+      });
 
       toast({
         title: "Profile updated",

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
+import { dashboardApi } from '@/lib/api';
 
 interface DashboardStats {
   applicationsTracked: number;
@@ -25,33 +25,12 @@ export const useDashboardStats = () => {
 
     const fetchStats = async () => {
       try {
-        // Fetch applications
-        const { data: applications } = await supabase
-          .from('job_applications')
-          .select('id')
-          .eq('user_id', user.id);
-
-        // Fetch interview questions  
-        const { data: questions } = await supabase
-          .from('interview_questions')
-          .select('id')
-          .eq('user_id', user.id);
-
-        // Fetch resume optimizations
-        const { data: optimizations } = await supabase
-          .from('resume_optimizations')
-          .select('match_score')
-          .eq('user_id', user.id);
-
-        const avgScore = optimizations?.length 
-          ? Math.round(optimizations.reduce((acc, curr) => acc + (curr.match_score || 0), 0) / optimizations.length)
-          : 0;
-
+        const data = await dashboardApi.getStats();
         setStats({
-          applicationsTracked: applications?.length || 0,
-          interviewsPracticed: questions?.length || 0,
-          resumesOptimized: optimizations?.length || 0,
-          averageMatchScore: avgScore,
+          applicationsTracked: data.applicationsTracked || 0,
+          interviewsPracticed: data.interviewsPracticed || 0,
+          resumesOptimized: data.resumesOptimized || 0,
+          averageMatchScore: data.averageMatchScore || 0,
           loading: false
         });
       } catch (error) {
@@ -62,36 +41,9 @@ export const useDashboardStats = () => {
 
     fetchStats();
 
-    // Set up real-time subscriptions
-    const subscriptions = [
-      supabase
-        .channel('job_applications_changes')
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: 'job_applications' }, 
-          () => fetchStats()
-        )
-        .subscribe(),
-      
-      supabase
-        .channel('interview_questions_changes')
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: 'interview_questions' }, 
-          () => fetchStats()
-        )
-        .subscribe(),
-        
-      supabase
-        .channel('resume_optimizations_changes')
-        .on('postgres_changes', 
-          { event: '*', schema: 'public', table: 'resume_optimizations' }, 
-          () => fetchStats()
-        )
-        .subscribe()
-    ];
-
-    return () => {
-      subscriptions.forEach(sub => sub.unsubscribe());
-    };
+    // Poll every 30 seconds instead of realtime subscriptions
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
   }, [user]);
 
   return stats;

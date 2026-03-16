@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../hooks/useAuth';
 import { useVoice } from '../hooks/useVoice';
-import { supabase } from '../integrations/supabase/client';
+import { interviewsApi } from '../lib/api';
 import { generateInterviewQuestions, generateAnswer } from '../lib/gemini';
 import { 
   MessageSquare, 
@@ -85,27 +85,21 @@ export const InterviewPractice = () => {
 
   const fetchSavedAnswers = async () => {
     if (!user) return;
-    
-    const { data, error } = await supabase
-      .from('interview_questions')
-      .select('*')
-      .eq('user_id', user.id)
-      .not('user_answer', 'is', null)
-      .order('created_at', { ascending: false });
-    
-    if (error) {
-      console.error('Error fetching saved answers:', error);
-    } else {
+
+    try {
+      const data = await interviewsApi.listSaved();
       setSavedAnswers(
-        (data || []).map((q) => ({
-          id: q.id,
-          questionId: q.id,
+        (data || []).map((q: any) => ({
+          id: q._id,
+          questionId: q._id,
           question: q.question,
-          userAnswer: q.user_answer || '',
-          aiSuggestion: q.ai_suggestion || '',
-          createdAt: q.created_at,
+          userAnswer: q.userAnswer || '',
+          aiSuggestion: q.aiSuggestion || '',
+          createdAt: q.createdAt,
         }))
       );
+    } catch (error) {
+      console.error('Error fetching saved answers:', error);
     }
   };
 
@@ -123,24 +117,14 @@ export const InterviewPractice = () => {
     
     try {
       const questionTemplates = await generateInterviewQuestions(jobRole.trim(), companyName.trim() || undefined);
-      
-      const questionsToSave = questionTemplates.map((template) => ({
-        user_id: user!.id,
-        question: template.question,
-        job_title: jobRole.trim(),
-        company_name: companyName.trim() || null,
-      }));
 
-      const { data, error } = await supabase
-        .from('interview_questions')
-        .insert(questionsToSave)
-        .select();
-
-      if (error) throw error;
-
-      setQuestions(data.map((q) => ({
-        ...q,
-        company_name: q.company_name === null ? undefined : q.company_name,
+      // Backend already saves questions - just map the returned data
+      setQuestions(questionTemplates.map((q: any) => ({
+        id: q._id,
+        question: q.question,
+        job_title: q.jobTitle,
+        company_name: q.companyName || undefined,
+        created_at: q.createdAt,
       })));
 
       toast({
@@ -192,15 +176,10 @@ export const InterviewPractice = () => {
     }
 
     try {
-      const { error } = await supabase
-        .from('interview_questions')
-        .update({ 
-          user_answer: userAnswer.trim(),
-          ai_suggestion: aiSuggestion 
-        })
-        .eq('id', questions[currentQuestionIndex].id);
-
-      if (error) throw error;
+      await interviewsApi.saveAnswer(questions[currentQuestionIndex].id, {
+        userAnswer: userAnswer.trim(),
+        aiSuggestion: aiSuggestion,
+      });
 
       toast({
         title: "Answer saved!",
@@ -246,12 +225,7 @@ export const InterviewPractice = () => {
 
   const deleteSavedAnswer = async (id: string) => {
     try {
-      const { error } = await supabase
-        .from('interview_questions')
-        .update({ user_answer: null, ai_suggestion: null })
-        .eq('id', id);
-
-      if (error) throw error;
+      await interviewsApi.deleteAnswer(id);
 
       await fetchSavedAnswers();
       toast({
@@ -273,12 +247,9 @@ export const InterviewPractice = () => {
 
     setIsLoading(true);
     try {
-      const { error } = await supabase
-        .from('interview_questions')
-        .update({ user_answer: editedAnswer.trim() })
-        .eq('id', editingAnswer.id);
-
-      if (error) throw error;
+      await interviewsApi.saveAnswer(editingAnswer.id, {
+        userAnswer: editedAnswer.trim(),
+      });
 
       toast({
         title: "Answer updated",

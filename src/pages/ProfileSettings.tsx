@@ -7,7 +7,7 @@ import { Label } from '../components/ui/label';
 import { Separator } from '../components/ui/separator';
 import { useToast } from '../hooks/use-toast';
 import { useAuth } from '../hooks/useAuth';
-import { supabase } from '../integrations/supabase/client';
+import { profileApi } from '../lib/api';
 import { Settings, Bell, Shield, Eye, Trash2 } from 'lucide-react';
 
 export const ProfileSettings = () => {
@@ -30,33 +30,26 @@ export const ProfileSettings = () => {
   useEffect(() => {
     const fetchSettings = async () => {
       if (!user?.id) return;
-      
-      try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('email_notifications, interview_reminders, resume_optimization_alerts, profile_visibility, data_analytics')
-          .eq('user_id', user.id)
-          .single();
 
-        if (error && error.code !== 'PGRST116') {
-          console.error('Error fetching settings:', error);
-          toast({
-            title: "Error",
-            description: "Failed to load your settings.",
-            variant: "destructive",
-          });
-          return;
-        }
+      try {
+        const data = await profileApi.get();
 
         if (data) {
           setSettings({
-            email_notifications: data.email_notifications ?? true,
-            interview_reminders: data.interview_reminders ?? true,
-            resume_optimization_alerts: data.resume_optimization_alerts ?? true,
-            profile_visibility: data.profile_visibility ?? false,
-            data_analytics: data.data_analytics ?? true,
+            email_notifications: data.emailNotifications ?? true,
+            interview_reminders: data.interviewReminders ?? true,
+            resume_optimization_alerts: data.resumeOptimizationAlerts ?? true,
+            profile_visibility: data.profileVisibility ?? false,
+            data_analytics: data.dataAnalytics ?? true,
           });
         }
+      } catch (error) {
+        console.error('Error fetching settings:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load your settings.",
+          variant: "destructive",
+        });
       } finally {
         setLoading(false);
       }
@@ -74,31 +67,27 @@ export const ProfileSettings = () => {
 
   const handleSaveSettings = async () => {
     if (!user?.id) return;
-    
+
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .upsert({
-          user_id: user.id,
-          ...settings,
-        }, {
-          onConflict: 'user_id'
-        });
-
-      if (error) {
-        console.error('Error saving settings:', error);
-        toast({
-          title: "Error",
-          description: "Failed to save your settings. Please try again.",
-          variant: "destructive",
-        });
-        return;
-      }
+      await profileApi.updateSettings({
+        emailNotifications: settings.email_notifications,
+        interviewReminders: settings.interview_reminders,
+        resumeOptimizationAlerts: settings.resume_optimization_alerts,
+        profileVisibility: settings.profile_visibility,
+        dataAnalytics: settings.data_analytics,
+      });
 
       toast({
         title: "Settings saved",
         description: "Your profile settings have been updated successfully.",
+      });
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      toast({
+        title: "Error",
+        description: "Failed to save your settings. Please try again.",
+        variant: "destructive",
       });
     } finally {
       setSaving(false);
